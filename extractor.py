@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import re
 from datetime import datetime
 
 from bs4 import BeautifulSoup
@@ -64,10 +65,22 @@ def write_messages_to_txt(messages, out_path: str):
             f.write(f"{text}\n\n")
 
 
+_TELEGRAM_MESSAGES_HTML = re.compile(r"^messages(\d*)\.html$", re.IGNORECASE)
+
+
+def _telegram_messages_chunk_key(filename: str) -> tuple:
+    m = _TELEGRAM_MESSAGES_HTML.match(filename)
+    if m:
+        digits = m.group(1)
+        return (0, int(digits) if digits else 1)
+    return (1, filename.lower())
+
+
 def collect_messages_from_path(path: str):
     """
     If path is a file, extract messages from that single HTML.
     If path is a directory, extract messages from all *.html files inside (non-recursive),
+    merged in numeric Telegram chunk order (messages.html, messages2.html, …),
     and return a single combined list.
     """
     all_messages = []
@@ -76,13 +89,18 @@ def collect_messages_from_path(path: str):
         return extract_messages_from_html(path)
 
     if os.path.isdir(path):
-        # Process all .html files in alphabetical order for determinism
-        for name in sorted(os.listdir(path)):
+        # Numeric Telegram chunk order (messages.html, messages2.html, …); other
+        # *.html files after chunks, then alphabetically.
+        html_names = []
+        for name in os.listdir(path):
             if not name.lower().endswith(".html"):
                 continue
             full_path = os.path.join(path, name)
             if not os.path.isfile(full_path):
                 continue
+            html_names.append(name)
+        for name in sorted(html_names, key=_telegram_messages_chunk_key):
+            full_path = os.path.join(path, name)
             msgs = extract_messages_from_html(full_path)
             all_messages.extend(msgs)
         return all_messages
